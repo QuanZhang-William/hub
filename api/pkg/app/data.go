@@ -42,6 +42,7 @@ type Catalog struct {
 	ContextDir string
 	Revision   string
 	Provider   string
+	Versioning string
 }
 
 type Scope struct {

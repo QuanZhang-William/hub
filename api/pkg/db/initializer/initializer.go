@@ -127,6 +127,7 @@ func addCatalogs(db *gorm.DB, log *log.Logger, data *app.Data) error {
 			Provider:   c.Provider,
 			Revision:   c.Revision,
 			ContextDir: c.ContextDir,
+			Versioning: c.Versioning,
 		}
 		if err := db.Where(&model.Catalog{Name: c.Name, Org: c.Org}).FirstOrCreate(&cat).Error; err != nil {
 			log.Error(err)

@@ -46,6 +46,7 @@ type (
 		Org        string `gorm:"uniqueIndex:uix_name_org"`
 		Provider   string `gorm:"not null;default:github"`
 		Type       string `gorm:"not null;default:null"`
+		Versioning string `gorm:"not null;default:directory"`
 		URL        string `gorm:"not null;default:null"`
 		SSHURL     string
 		Revision   string `gorm:"not null;default:null"`

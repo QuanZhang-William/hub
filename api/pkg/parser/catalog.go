@@ -22,6 +22,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -202,32 +203,25 @@ func (c CatalogParser) parseResource(kind, kindPath string, f os.FileInfo) (*Res
 	} else {
 		// search for catalog/<contextPath>/<kind>/<name>
 		dir := filepath.Join(kindPath, name)
-		if _, err := os.Stat(dir); err != nil {
-			result.AddError(err)
-			return nil, result
-		}
-
-		if err := os.Chdir(dir); err != nil {
-			result.AddError(err)
-			return nil, result
-		}
-
-		tags, err := git.Git(log, dir, "for-each-ref", "--format=%(refname)", "refs/tags")
+		releases, err := git.Git(log, dir, "for-each-ref", "--format=%(refname)", "refs/tags")
 		if err != nil {
 			result.AddError(err)
 			return nil, result
 		}
-
-		if len(tags) == 0 {
-			log.Info("Release not found for")
+		if len(releases) == 0 {
+			log.Info("Release not found for resource: %s in directory: %s", name, dir)
 			return nil, result
 		}
+		releasesArr := strings.Split(strings.TrimSpace(releases), "\n")
 
-		tagsArr := strings.Split(strings.TrimSpace(tags), "\n")
-
-		for _, tag := range tagsArr {
-			val := strings.Split(tag, "/")[2]
-			log.Info("processing tag: ", val)
+		for _, r := range releasesArr {
+			val := strings.Split(r, "/")[2]
+			log.Info("processing release: ", val)
+			if !validateReleaseFormat(val) {
+				issue := fmt.Sprintf("found release tag does not match catalog versioning requirement: %s, skipping...", val)
+				log.With("action", "ignore").Info(issue)
+				result.Warn(issue)
+			}
 
 			git.Git(log, "", "checkout", val)
 
@@ -367,6 +361,11 @@ func (c CatalogParser) appendVersion(res *Resource, filePath string) Result {
 	)
 
 	return result
+}
+
+func validateReleaseFormat(release string) bool {
+	match, _ := regexp.MatchString("v[0-9]+.[0-9]+", release)
+	return match
 }
 
 // decode consumes the given reader and parses its contents as YAML.

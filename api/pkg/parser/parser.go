@@ -38,11 +38,12 @@ func registerSchema() {
 
 var once sync.Once
 
-func ForCatalog(logger *zap.SugaredLogger, repo git.Repo, contextPath string) *CatalogParser {
+func ForCatalog(logger *zap.SugaredLogger, repo git.Repo, contextPath, versioning string) *CatalogParser {
 	once.Do(registerSchema)
 	return &CatalogParser{
 		logger:      logger.With("component", "parser"),
 		repo:        repo,
 		contextPath: contextPath,
+		versioning:  versioning,
 	}
 }

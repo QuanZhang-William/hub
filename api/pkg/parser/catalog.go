@@ -73,6 +73,7 @@ type CatalogParser struct {
 	logger      *zap.SugaredLogger
 	repo        git.Repo
 	contextPath string
+	versioning  string
 }
 
 func (c *CatalogParser) Parse() ([]Resource, Result) {
@@ -162,40 +163,83 @@ func (c CatalogParser) parseResource(kind, kindPath string, f os.FileInfo) (*Res
 	}
 	result := Result{}
 
-	// search for catalog/<contextPath>/<kind>/<name>/<version>/<name.yaml>
-	pattern := filepath.Join(kindPath, name, "*", name+".yaml")
+	if c.versioning == "directory" {
+		// search for catalog/<contextPath>/<kind>/<name>/<version>/<name.yaml>
+		pattern := filepath.Join(kindPath, name, "*", name+".yaml")
 
-	matches, err := filepath.Glob(pattern)
-	if err != nil {
-		log.Warn(err, "failed to glob %s", pattern)
-		result.AddError(err)
-		return nil, result
-	}
-	if len(matches) == 0 {
-		log.Warn("failed to find resources in path %s", kindPath)
-		result.Critical("failed to find any resource matching %s", pattern)
-		return nil, result
-	}
-
-	if exp, got := dirCount(filepath.Join(kindPath, name)), len(matches); got != exp {
-		log.Warn("expected to find %d versions for %s/%s but found only", exp, kind, name, got)
-		result.Critical("expected to find %d versions but found only %d for %s ", exp, got, pattern)
-	}
-
-	for _, m := range matches {
-		log.Info(" found file: ", m)
-
-		r := c.appendVersion(&res, m)
-		result.Combine(r)
-		if r.Errors != nil {
-			log.Warn(result.Error())
-			continue
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			log.Warn(err, "failed to glob %s", pattern)
+			result.AddError(err)
+			return nil, result
 		}
-	}
+		if len(matches) == 0 {
+			log.Warn("failed to find resources in path %s", kindPath)
+			result.Critical("failed to find any resource matching %s", pattern)
+			return nil, result
+		}
 
-	log.Infof("found %d versions of resource %s/%s", len(res.Versions), kind, name)
-	if len(res.Versions) == 0 {
-		return nil, result
+		if exp, got := dirCount(filepath.Join(kindPath, name)), len(matches); got != exp {
+			log.Warn("expected to find %d versions for %s/%s but found only", exp, kind, name, got)
+			result.Critical("expected to find %d versions but found only %d for %s ", exp, got, pattern)
+		}
+
+		for _, m := range matches {
+			log.Info(" found file: ", m)
+
+			r := c.appendVersion(&res, m)
+			result.Combine(r)
+			if r.Errors != nil {
+				log.Warn(result.Error())
+				continue
+			}
+		}
+
+		log.Infof("found %d versions of resource %s/%s", len(res.Versions), kind, name)
+		if len(res.Versions) == 0 {
+			return nil, result
+		}
+	} else {
+		// search for catalog/<contextPath>/<kind>/<name>
+		dir := filepath.Join(kindPath, name)
+		if _, err := os.Stat(dir); err != nil {
+			result.AddError(err)
+			return nil, result
+		}
+
+		if err := os.Chdir(dir); err != nil {
+			result.AddError(err)
+			return nil, result
+		}
+
+		tags, err := git.Git(log, dir, "for-each-ref", "--format=%(refname)", "refs/tags")
+		if err != nil {
+			result.AddError(err)
+			return nil, result
+		}
+
+		if len(tags) == 0 {
+			log.Info("Release not found for")
+			return nil, result
+		}
+
+		tagsArr := strings.Split(strings.TrimSpace(tags), "\n")
+
+		for _, tag := range tagsArr {
+			val := strings.Split(tag, "/")[2]
+			log.Info("processing tag: ", val)
+
+			git.Git(log, "", "checkout", val)
+
+			fp := filepath.Join(kindPath, name, name+".yaml")
+			r := c.appendVersion(&res, fp)
+
+			result.Combine(r)
+			if r.Errors != nil {
+				log.Warn(result.Error())
+				continue
+			}
+		}
 	}
 
 	return &res, result

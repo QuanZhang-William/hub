@@ -56,21 +56,39 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 
 	fetchArgs := []string{"fetch", "--recurse-submodules=yes", "origin", spec.Revision}
 
-	if _, err := git(log, "", fetchArgs...); err != nil {
+	if _, err := Git(log, "", fetchArgs...); err != nil {
 		// Fetch can fail if an old commit id was used so try git pull, performing regardless of error
 		// as no guarantee that the same error is returned by all git servers gitlab, github etc...
-		if _, err := git(log, "", "pull", "--recurse-submodules=yes", "origin"); err != nil {
+		if _, err := Git(log, "", "pull", "--recurse-submodules=yes", "origin"); err != nil {
 			log.Info("Failed to pull origin", "err", err)
 		}
-		if _, err := git(log, "", "checkout", spec.Revision); err != nil {
+		if _, err := Git(log, "", "checkout", spec.Revision); err != nil {
 			return nil, err
 		}
-	} else if _, err := git(log, "", "reset", "--hard", "FETCH_HEAD"); err != nil {
+	} else if _, err := Git(log, "", "reset", "--hard", "FETCH_HEAD"); err != nil {
 		return nil, err
 	}
 	log.With("url", spec.URL, "revision", spec.Revision, "path", repo.path).Info("successfully cloned")
 
+	if spec.FetchAllTags {
+		fetchArgs = []string{"fetch", "--all", "--tags"}
+		if _, err := Git(log, "", fetchArgs...); err != nil {
+			return nil, err
+		}
+		log.With("url", spec.URL, "revision", spec.Revision, "path", repo.path).Info("successfully fetched tags")
+	}
+
 	return repo, nil
+}
+
+func Git(log *zap.SugaredLogger, kind string, args ...string) (string, error) {
+	output, err := rawGit(kind, args...)
+
+	if err != nil {
+		log.Errorf("git %s : error %s ;output: %s", strings.Join(args, " "), err.Error(), output)
+		return "", err
+	}
+	return output, nil
 }
 
 func (c *client) initRepo(spec FetchSpec) (*LocalRepo, error) {
@@ -94,7 +112,7 @@ func (c *client) initRepo(spec FetchSpec) (*LocalRepo, error) {
 		return repo, nil
 	}
 
-	if _, err := git(log, "", "init", clonePath); err != nil {
+	if _, err := Git(log, "", "init", clonePath); err != nil {
 		return nil, err
 	}
 
@@ -102,11 +120,11 @@ func (c *client) initRepo(spec FetchSpec) (*LocalRepo, error) {
 		return nil, fmt.Errorf("failed to change directory with path %s; err: %w", spec.Path, err)
 	}
 
-	if _, err := git(log, "", "remote", "add", "origin", cloneUrl); err != nil {
+	if _, err := Git(log, "", "remote", "add", "origin", cloneUrl); err != nil {
 		return nil, err
 	}
 
-	if _, err := git(log, "", "config", "http.sslVerify", strconv.FormatBool(spec.SSLVerify)); err != nil {
+	if _, err := Git(log, "", "config", "http.sslVerify", strconv.FormatBool(spec.SSLVerify)); err != nil {
 		log.Error(err, "failed to set http.sslVerify in git configs")
 		return nil, err
 	}
@@ -140,16 +158,6 @@ func ensureHomeEnv(log *zap.SugaredLogger) error {
 		}
 	}
 	return nil
-}
-
-func git(log *zap.SugaredLogger, kind string, args ...string) (string, error) {
-	output, err := rawGit(kind, args...)
-
-	if err != nil {
-		log.Errorf("git %s : error %s ;output: %s", strings.Join(args, " "), err.Error(), output)
-		return "", err
-	}
-	return output, nil
 }
 
 func rawGit(dir string, args ...string) (string, error) {

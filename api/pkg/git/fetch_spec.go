@@ -21,13 +21,14 @@ import (
 
 // FetchSpec describes how to initialize and fetch from a Git repository.
 type FetchSpec struct {
-	URL         string
-	SSHUrl      string
-	Revision    string
-	Path        string
-	Depth       uint
-	SSLVerify   bool
-	CatalogName string
+	URL          string
+	SSHUrl       string
+	Revision     string
+	Path         string
+	Depth        uint
+	SSLVerify    bool
+	CatalogName  string
+	FetchAllTags bool
 }
 
 func (f *FetchSpec) sanitize() {

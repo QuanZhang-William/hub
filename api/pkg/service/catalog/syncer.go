@@ -231,7 +231,7 @@ func (s *syncer) Process() error {
 		return err
 	}
 
-	fetchSpec := git.FetchSpec{URL: catalog.URL, Revision: catalog.Revision, Path: s.clonePath, SSHUrl: catalog.SSHURL, CatalogName: catalog.Name}
+	fetchSpec := git.FetchSpec{URL: catalog.URL, Revision: catalog.Revision, Path: s.clonePath, SSHUrl: catalog.SSHURL, CatalogName: catalog.Name, FetchAllTags: catalog.Versioning == "git"}
 	repo, err := s.git.Fetch(fetchSpec)
 	if err != nil {
 		log.Error(err, "clone failed")
@@ -246,7 +246,7 @@ func (s *syncer) Process() error {
 	}
 
 	// parse the catalog and fill the db
-	parser := parser.ForCatalog(s.logger, repo, catalog.ContextDir)
+	parser := parser.ForCatalog(s.logger, repo, catalog.ContextDir, catalog.Versioning)
 
 	res, result := parser.Parse()
 	if err = s.updateJob(syncJob, repo.Head(), res, result); err != nil {

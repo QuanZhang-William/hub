@@ -16,9 +16,11 @@ package resource
 
 import (
 	"fmt"
+	"io/ioutil"
 	"strings"
 
 	"github.com/tektoncd/hub/api/gen/log"
+	"github.com/tektoncd/hub/api/gen/resource"
 	"github.com/tektoncd/hub/api/pkg/db/model"
 	"github.com/tektoncd/hub/api/pkg/parser"
 	"gorm.io/gorm"
@@ -171,6 +173,15 @@ func (r *Request) ByID() (model.Resource, error) {
 	return res, nil
 }
 
+func (r *Request) FindResourceVersioning() (string, error) {
+	var res model.Catalog
+	if err := r.Db.Where("name=?", r.Catalog).Find(&res).Error; err != nil {
+		return "", err
+	}
+
+	return res.Versioning, nil
+}
+
 func (r *Request) findAllResources() ([]model.Resource, error) {
 
 	var rs []model.Resource
@@ -184,6 +195,21 @@ func (r *Request) findAllResources() ([]model.Resource, error) {
 	}
 
 	return rs, nil
+}
+
+func readFromFile(pathToResource, versioning string) ([]byte, error) {
+
+	content, err := ioutil.ReadFile(pathToResource)
+	if err != nil {
+		return nil, resource.MakeNotFound(fmt.Errorf("resource not found"))
+	}
+
+	return content, nil
+}
+
+func withCatalog(db *gorm.DB) *gorm.DB {
+	return db.
+		Preload("Catalog")
 }
 
 func withCatalogAndTags(db *gorm.DB) *gorm.DB {

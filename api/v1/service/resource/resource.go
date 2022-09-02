@@ -26,6 +26,7 @@ import (
 
 	"github.com/tektoncd/hub/api/pkg/app"
 	"github.com/tektoncd/hub/api/pkg/db/model"
+	"github.com/tektoncd/hub/api/pkg/git"
 	res "github.com/tektoncd/hub/api/pkg/shared/resource"
 	"github.com/tektoncd/hub/api/v1/gen/resource"
 )
@@ -35,6 +36,7 @@ type service struct {
 }
 
 var replacerStrings = []string{"github.com", "raw.githubusercontent.com", "/tree/", "/", "/blob/", "/raw/", "/src/", "/raw/"}
+var gitClient git.Client
 
 // Returns a replacer object which replaces a list of strings with replacements.
 // This function basically helps create the raw URL
@@ -49,6 +51,7 @@ func getStringReplacer(resourceUrl, provider string) *strings.Replacer {
 
 // New returns the resource service implementation.
 func New(api app.BaseConfig) resource.Service {
+	gitClient = git.New(api.Logger("git").SugaredLogger)
 	return &service{api.Service("resource")}
 }
 
@@ -183,7 +186,28 @@ func (s *service) ByCatalogKindNameVersion(ctx context.Context, p *resource.ByCa
 func (s *service) ByCatalogKindNameVersionReadme(ctx context.Context,
 	p *resource.ByCatalogKindNameVersionReadmePayload) (*resource.ResourceVersionReadme, error) {
 
-	readmePath := fmt.Sprintf("%s/%s/%s/%s/%s/README.md", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version)
+	req := res.Request{
+		Db:      s.DB(ctx),
+		Log:     s.Logger(ctx),
+		Catalog: p.Catalog,
+		Kind:    p.Kind,
+		Name:    p.Name,
+	}
+
+	versioning, err := req.FindResourceVersioning()
+	if err != nil {
+		return nil, resource.MakeNotFound(fmt.Errorf("catalog not found"))
+	}
+
+	var readmePath string
+	if versioning == "git" {
+		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
+		readmePath = fmt.Sprintf("%s/%s/%s/README.md", repoPath, strings.ToLower(p.Kind), p.Name)
+		gitClient.Checkout(repoPath, "v"+p.Version)
+	} else {
+		readmePath = fmt.Sprintf("%s/%s/%s/%s/%s/README.md", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version)
+	}
+
 	s.Logger(ctx).Info(fmt.Sprintf("Fetching README for resource %s", p.Name))
 	content, err := ioutil.ReadFile(readmePath)
 	if err != nil {
@@ -203,9 +227,27 @@ func (s *service) ByCatalogKindNameVersionReadme(ctx context.Context,
 // Returns the YAML of the resource from the cloned catalog
 func (s *service) ByCatalogKindNameVersionYaml(ctx context.Context,
 	p *resource.ByCatalogKindNameVersionYamlPayload) (*resource.ResourceVersionYaml, error) {
+	req := res.Request{
+		Db:      s.DB(ctx),
+		Log:     s.Logger(ctx),
+		Catalog: p.Catalog,
+		Kind:    p.Kind,
+		Name:    p.Name,
+	}
+	versioning, err := req.FindResourceVersioning()
+	if err != nil {
+		return nil, resource.MakeNotFound(fmt.Errorf("catalog not found"))
+	}
 
-	yamlPath := fmt.Sprintf("%s/%s/%s/%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version)
-	yamlPath = fmt.Sprintf("%s/%s.yaml", yamlPath, p.Name)
+	var yamlPath string
+	if versioning == "git" {
+		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
+		yamlPath = fmt.Sprintf("%s/%s/%s/%s.yaml", repoPath, strings.ToLower(p.Kind), p.Name, p.Name)
+		gitClient.Checkout(repoPath, "v"+p.Version)
+	} else {
+		yamlPath = fmt.Sprintf("%s/%s/%s/%s/%s/%s.yaml", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version, p.Name)
+	}
+
 	s.Logger(ctx).Info(fmt.Sprintf("Fetching YAML for resource %s", p.Name))
 	content, err := ioutil.ReadFile(yamlPath)
 	if err != nil {
@@ -306,6 +348,39 @@ func (s *service) ByID(ctx context.Context, p *resource.ByIDPayload) (*resource.
 	}
 
 	return &resource.Resource{Data: res}, nil
+}
+
+// Fetch a raw resource yaml file using the name of catalog, resource name, kind, and version
+func (s *service) GetRawYamlByCatalogKindNameVersion(ctx context.Context, p *resource.GetRawYamlByCatalogKindNameVersionPayload) (io.ReadCloser, error) {
+	s.Logger(ctx).Info(fmt.Sprintf("Fetching YAML for resource %s", p.Name))
+
+	req := res.Request{
+		Db:      s.DB(ctx),
+		Log:     s.Logger(ctx),
+		Catalog: p.Catalog,
+		Kind:    p.Kind,
+		Name:    p.Name,
+	}
+
+	versioning, err := req.FindResourceVersioning()
+	if err != nil {
+		return nil, resource.MakeNotFound(fmt.Errorf("catalog not found"))
+	}
+
+	var yamlPath string
+	if versioning == "git" {
+		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
+		yamlPath = fmt.Sprintf("%s/%s/%s/%s.yaml", repoPath, strings.ToLower(p.Kind), p.Name, p.Name)
+		gitClient.Checkout(repoPath, "v"+p.Version)
+	} else {
+		yamlPath = fmt.Sprintf("%s/%s/%s/%s/%s/%s.yaml", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version, p.Name)
+	}
+
+	content, err := ioutil.ReadFile(yamlPath)
+	if err != nil {
+		return nil, resource.MakeNotFound(fmt.Errorf("resource not found"))
+	}
+	return ioutil.NopCloser(bytes.NewBuffer(content)), nil
 }
 
 func filterCompatibleVersions(r model.Resource, pipelinesVersion string) model.Resource {
@@ -502,19 +577,4 @@ func versionInfoFromVersion(v model.ResourceVersion) *resource.ResourceVersion {
 	// the required info
 	v.Resource.Versions = []model.ResourceVersion{v}
 	return versionInfoFromResource(v.Resource, "")
-}
-
-// Fetch a raw resource yaml file using the name of catalog, resource name, kind, and version
-func (s *service) GetRawYamlByCatalogKindNameVersion(ctx context.Context, p *resource.GetRawYamlByCatalogKindNameVersionPayload) (io.ReadCloser, error) {
-	s.Logger(ctx).Info(fmt.Sprintf("Fetching YAML for resource %s", p.Name))
-
-	yamlPath := fmt.Sprintf("%s/%s/%s/%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog), strings.ToLower(p.Kind), p.Name, p.Version)
-	yamlPath = fmt.Sprintf("%s/%s.yaml", yamlPath, p.Name)
-
-	content, err := ioutil.ReadFile(yamlPath)
-	if err != nil {
-		return nil, resource.MakeNotFound(fmt.Errorf("resource not found"))
-	}
-
-	return ioutil.NopCloser(bytes.NewBuffer(content)), nil
 }

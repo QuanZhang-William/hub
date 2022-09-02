@@ -28,14 +28,27 @@ import (
 
 type Client interface {
 	Fetch(spec FetchSpec) (Repo, error)
+	Checkout(path, revision string) error
 }
 
 type client struct {
-	log *zap.SugaredLogger
+	log  *zap.SugaredLogger
+	lock chan int
 }
 
+var (
+	instance *client
+)
+
 func New(log *zap.SugaredLogger) Client {
-	return &client{log: log}
+	if instance == nil {
+		instance = &client{
+			log:  log,
+			lock: make(chan int, 1),
+		}
+	}
+
+	return instance
 }
 
 // Fetch fetches the specified git repository at the revision into path.
@@ -71,7 +84,7 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 	log.With("url", spec.URL, "revision", spec.Revision, "path", repo.path).Info("successfully cloned")
 
 	if spec.FetchAllTags {
-		fetchArgs = []string{"fetch", "--all", "--tags"}
+		fetchArgs = []string{"fetch", "--all", "--tags", "-f"}
 		if _, err := Git(log, "", fetchArgs...); err != nil {
 			return nil, err
 		}
@@ -81,11 +94,23 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 	return repo, nil
 }
 
+func (c *client) Checkout(repoPath, revision string) error {
+	defer func() { <-c.lock }()
+	log := c.log.With("name", "git")
+	c.lock <- 1
+	if _, err := Git(log, repoPath, "checkout", revision); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func Git(log *zap.SugaredLogger, kind string, args ...string) (string, error) {
 	output, err := rawGit(kind, args...)
 
 	if err != nil {
 		log.Errorf("git %s : error %s ;output: %s", strings.Join(args, " "), err.Error(), output)
+		fmt.Print(err.Error())
 		return "", err
 	}
 	return output, nil

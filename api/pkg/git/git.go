@@ -21,6 +21,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/mitchellh/go-homedir"
 	"go.uber.org/zap"
@@ -38,15 +39,17 @@ type client struct {
 
 var (
 	instance *client
+	once     sync.Once
 )
 
 func New(log *zap.SugaredLogger) Client {
-	if instance == nil {
+	// return single instance of Git Client
+	once.Do(func() {
 		instance = &client{
 			log:  log,
 			lock: make(chan int, 1),
 		}
-	}
+	})
 
 	return instance
 }
@@ -84,7 +87,7 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 	log.With("url", spec.URL, "revision", spec.Revision, "path", repo.path).Info("successfully cloned")
 
 	if spec.FetchAllTags {
-		fetchArgs = []string{"fetch", "--all", "--tags", "-f"}
+		fetchArgs = []string{"fetch", "--tags", "-f"}
 		if _, err := Git(log, "", fetchArgs...); err != nil {
 			return nil, err
 		}

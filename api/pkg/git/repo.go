@@ -15,6 +15,7 @@
 package git
 
 import (
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ type Repo interface {
 	Head() string
 	ModifiedTime(path string) (time.Time, error)
 	RelPath(path string) (string, error)
+	LatestRelease() (string, error)
 }
 
 type LocalRepo struct {
@@ -63,4 +65,16 @@ func (r LocalRepo) ModifiedTime(path string) (time.Time, error) {
 // RelPath returns the path of file relative to repo's path
 func (r LocalRepo) RelPath(file string) (string, error) {
 	return filepath.Rel(r.path, file)
+}
+
+// LatestTag returns latest tag of the repo that matches Catalog release pattern
+func (r LocalRepo) LatestRelease() (string, error) {
+	lTag, err := exec.Command("bash", "-c", "git tag  | grep -E '^v[0-9]' | sort -V | tail -1").Output()
+	if err != nil {
+		return "", err
+	}
+
+	lTagStr := strings.TrimSpace(string(lTag))
+
+	return lTagStr, nil
 }

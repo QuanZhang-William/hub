@@ -15,6 +15,7 @@
 package catalog
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -239,7 +240,29 @@ func (s *syncer) Process() error {
 		return nil
 	}
 
-	if repo.Head() == catalog.SHA {
+	isTagSynced := true
+	isHeadSynced := repo.Head() == catalog.SHA
+
+	if catalog.Versioning == "git" {
+		rlr, err := repo.LatestRelease()
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+
+		// check latest version in DB
+		lr, err := s.getCatalogLatestVersion(&catalog)
+		if err != nil {
+			log.Error(err)
+			return err
+		}
+
+		if fmt.Sprintf("v%s", lr) != rlr {
+			isTagSynced = false
+		}
+	}
+
+	if isTagSynced && isHeadSynced {
 		log.Infof("skipping already cloned catalog - %s | sha: %s", catalog.URL, catalog.SHA)
 		setJobState(model.JobDone)
 		return nil
@@ -256,6 +279,32 @@ func (s *syncer) Process() error {
 	}
 	setJobState(model.JobDone)
 	return nil
+}
+
+func (s *syncer) getCatalogLatestVersion(catalog *model.Catalog) (string, error) {
+	log := s.logger.With("action", "getLatestRelease", "catalog-id", catalog.ID)
+
+	r := model.Resource{}
+	if err := s.db.Where("catalog_id = ?", catalog.ID).First(&r).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+
+		log.Error(fmt.Sprintf("unexpected error: %v", err))
+		return "", nil
+	}
+
+	clv := model.ResourceVersion{}
+	if err := s.db.Where("resource_id = ?", r.ID).Order("version desc").First(&clv).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", nil
+		}
+
+		log.Error(fmt.Sprintf("unexpected error: %v", err))
+		return "", err
+	}
+
+	return clv.Version, nil
 }
 
 func (s *syncer) updateJob(syncJob model.SyncJob, sha string, res []parser.Resource, result parser.Result) error {
@@ -532,4 +581,12 @@ func (s *syncer) deletePlatform(txn *gorm.DB, log *zap.SugaredLogger, platforms 
 			log.Infof("Platform with ID: %d has been deleted", t.PlatformID)
 		}
 	}
+}
+
+func (s *syncer) getLatestCatalogVersion(txn *gorm.DB, log *zap.SugaredLogger, catalog *model.Catalog) (model.ResourceVersion, error) {
+	r := model.Resource{}
+	rv := model.ResourceVersion{}
+	err := txn.Model(&catalog).Association("resources").DB.First(&r).Association("versions").Find(&rv)
+
+	return rv, err
 }

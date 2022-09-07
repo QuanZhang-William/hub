@@ -67,7 +67,7 @@ func (r LocalRepo) RelPath(file string) (string, error) {
 	return filepath.Rel(r.path, file)
 }
 
-// LatestTag returns latest tag of the repo that matches Catalog release pattern
+// LatestRelease returns latest tag of the repo that matches Catalog release pattern
 func (r LocalRepo) LatestRelease() (string, error) {
 	lTag, err := exec.Command("bash", "-c", "git tag  | grep -E '^v[0-9]' | sort -V | tail -1").Output()
 	if err != nil {

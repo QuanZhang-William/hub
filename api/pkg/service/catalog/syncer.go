@@ -40,6 +40,8 @@ type syncer struct {
 	clonePath string
 }
 
+const GitVersioning string = "git"
+
 var (
 	queued  = &model.SyncJob{Status: model.JobQueued.String()}
 	running = &model.SyncJob{Status: model.JobRunning.String()}
@@ -232,7 +234,7 @@ func (s *syncer) Process() error {
 		return err
 	}
 
-	fetchSpec := git.FetchSpec{URL: catalog.URL, Revision: catalog.Revision, Path: s.clonePath, SSHUrl: catalog.SSHURL, CatalogName: catalog.Name, FetchAllTags: catalog.Versioning == "git"}
+	fetchSpec := git.FetchSpec{URL: catalog.URL, Revision: catalog.Revision, Path: s.clonePath, SSHUrl: catalog.SSHURL, CatalogName: catalog.Name, FetchTags: catalog.Versioning == GitVersioning}
 	repo, err := s.git.Fetch(fetchSpec)
 	if err != nil {
 		log.Error(err, "clone failed")
@@ -240,10 +242,10 @@ func (s *syncer) Process() error {
 		return nil
 	}
 
-	isTagSynced := true
-	isHeadSynced := repo.Head() == catalog.SHA
+	isGitReleaseSynced := true
+	isGitHeadSynced := repo.Head() == catalog.SHA
 
-	if catalog.Versioning == "git" {
+	if catalog.Versioning == GitVersioning {
 		rlr, err := repo.LatestRelease()
 		if err != nil {
 			log.Error(err)
@@ -251,25 +253,26 @@ func (s *syncer) Process() error {
 		}
 
 		// check latest version in DB
-		lr, err := s.getCatalogLatestVersion(&catalog)
+		clv, err := s.getCatalogLatestVersion(&catalog)
 		if err != nil {
 			log.Error(err)
 			return err
 		}
 
-		if fmt.Sprintf("v%s", lr) != rlr {
-			isTagSynced = false
+		if fmt.Sprintf("v%s", clv) != rlr {
+			log.Infof("found a newer catalog release: %s, latest version in DB: v%s", rlr, clv)
+			isGitReleaseSynced = false
 		}
 	}
 
-	if isTagSynced && isHeadSynced {
+	if isGitReleaseSynced && isGitHeadSynced {
 		log.Infof("skipping already cloned catalog - %s | sha: %s", catalog.URL, catalog.SHA)
 		setJobState(model.JobDone)
 		return nil
 	}
 
 	// parse the catalog and fill the db
-	parser := parser.ForCatalog(s.logger, repo, catalog.ContextDir, catalog.Versioning)
+	parser := parser.ForCatalog(s.logger, repo, catalog.ContextDir, catalog.Versioning, s.git)
 
 	res, result := parser.Parse()
 	if err = s.updateJob(syncJob, repo.Head(), res, result); err != nil {
@@ -282,7 +285,7 @@ func (s *syncer) Process() error {
 }
 
 func (s *syncer) getCatalogLatestVersion(catalog *model.Catalog) (string, error) {
-	log := s.logger.With("action", "getLatestRelease", "catalog-id", catalog.ID)
+	log := s.logger.With("action", "getCatalogLatestVersion", "catalog-id", catalog.ID)
 
 	r := model.Resource{}
 	if err := s.db.Where("catalog_id = ?", catalog.ID).First(&r).Error; err != nil {
@@ -291,11 +294,11 @@ func (s *syncer) getCatalogLatestVersion(catalog *model.Catalog) (string, error)
 		}
 
 		log.Error(fmt.Sprintf("unexpected error: %v", err))
-		return "", nil
+		return "", err
 	}
 
-	clv := model.ResourceVersion{}
-	if err := s.db.Where("resource_id = ?", r.ID).Order("version desc").First(&clv).Error; err != nil {
+	rv := model.ResourceVersion{}
+	if err := s.db.Where("resource_id = ?", r.ID).Order("version desc").First(&rv).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return "", nil
 		}
@@ -304,7 +307,7 @@ func (s *syncer) getCatalogLatestVersion(catalog *model.Catalog) (string, error)
 		return "", err
 	}
 
-	return clv.Version, nil
+	return rv.Version, nil
 }
 
 func (s *syncer) updateJob(syncJob model.SyncJob, sha string, res []parser.Resource, result parser.Result) error {
@@ -581,12 +584,4 @@ func (s *syncer) deletePlatform(txn *gorm.DB, log *zap.SugaredLogger, platforms 
 			log.Infof("Platform with ID: %d has been deleted", t.PlatformID)
 		}
 	}
-}
-
-func (s *syncer) getLatestCatalogVersion(txn *gorm.DB, log *zap.SugaredLogger, catalog *model.Catalog) (model.ResourceVersion, error) {
-	r := model.Resource{}
-	rv := model.ResourceVersion{}
-	err := txn.Model(&catalog).Association("resources").DB.First(&r).Association("versions").Find(&rv)
-
-	return rv, err
 }

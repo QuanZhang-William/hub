@@ -27,6 +27,7 @@ import (
 	"github.com/tektoncd/hub/api/pkg/app"
 	"github.com/tektoncd/hub/api/pkg/db/model"
 	"github.com/tektoncd/hub/api/pkg/git"
+	"github.com/tektoncd/hub/api/pkg/service/catalog"
 	res "github.com/tektoncd/hub/api/pkg/shared/resource"
 	"github.com/tektoncd/hub/api/v1/gen/resource"
 )
@@ -200,7 +201,7 @@ func (s *service) ByCatalogKindNameVersionReadme(ctx context.Context,
 	}
 
 	var readmePath string
-	if versioning == "git" {
+	if versioning == catalog.GitVersioning {
 		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
 		readmePath = fmt.Sprintf("%s/%s/%s/README.md", repoPath, strings.ToLower(p.Kind), p.Name)
 		gitClient.Checkout(repoPath, "v"+p.Version)
@@ -240,7 +241,7 @@ func (s *service) ByCatalogKindNameVersionYaml(ctx context.Context,
 	}
 
 	var yamlPath string
-	if versioning == "git" {
+	if versioning == catalog.GitVersioning {
 		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
 		yamlPath = fmt.Sprintf("%s/%s/%s/%s.yaml", repoPath, strings.ToLower(p.Kind), p.Name, p.Name)
 		gitClient.Checkout(repoPath, "v"+p.Version)
@@ -368,7 +369,7 @@ func (s *service) GetRawYamlByCatalogKindNameVersion(ctx context.Context, p *res
 	}
 
 	var yamlPath string
-	if versioning == "git" {
+	if versioning == catalog.GitVersioning {
 		repoPath := fmt.Sprintf("%s/%s", s.CatalogClonePath(), strings.ToLower(p.Catalog))
 		yamlPath = fmt.Sprintf("%s/%s/%s/%s.yaml", repoPath, strings.ToLower(p.Kind), p.Name, p.Name)
 		gitClient.Checkout(repoPath, "v"+p.Version)

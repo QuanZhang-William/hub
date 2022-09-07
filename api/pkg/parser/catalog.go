@@ -17,6 +17,7 @@ package parser
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -46,6 +47,7 @@ const (
 	PlatformsAnnotation           = "tekton.dev/platforms"
 	DefaultPlatform               = "linux/amd64"
 	DeprecatedAnnotation          = "tekton.dev/deprecated"
+	DirectoryVersioning           = "directory"
 )
 
 type (
@@ -73,6 +75,7 @@ type (
 type CatalogParser struct {
 	logger      *zap.SugaredLogger
 	repo        git.Repo
+	gitClient   git.Client
 	contextPath string
 	versioning  string
 }
@@ -164,7 +167,7 @@ func (c CatalogParser) parseResource(kind, kindPath string, f os.FileInfo) (*Res
 	}
 	result := Result{}
 
-	if c.versioning == "directory" {
+	if c.versioning == DirectoryVersioning {
 		// search for catalog/<contextPath>/<kind>/<name>/<version>/<name.yaml>
 		pattern := filepath.Join(kindPath, name, "*", name+".yaml")
 
@@ -209,34 +212,63 @@ func (c CatalogParser) parseResource(kind, kindPath string, f os.FileInfo) (*Res
 			return nil, result
 		}
 		if len(releases) == 0 {
-			log.Info("Release not found for resource: %s in directory: %s", name, dir)
+			log.Warn("release not found for resource: %s in directory: %s", name, dir)
+			result.Critical("failed to find any releases for %s", dir)
 			return nil, result
 		}
 		releasesArr := strings.Split(strings.TrimSpace(releases), "\n")
 
 		for _, r := range releasesArr {
-			val := strings.Split(r, "/")[2]
-			log.Info("processing release: ", val)
-			if !validateReleaseFormat(val) {
-				issue := fmt.Sprintf("found release tag does not match catalog versioning requirement: %s, skipping...", val)
+			releaseVal := strings.Split(r, "/")[2]
+			log.Info("processing release: ", releaseVal)
+			if !validateReleaseFormat(releaseVal) {
+				issue := fmt.Sprintf("found release tag does not match catalog versioning requirement: %s, skipping...", releaseVal)
 				log.With("action", "ignore").Info(issue)
-				result.Warn(issue)
+				result.Info(issue)
+				continue
 			}
 
-			git.Git(log, "", "checkout", val)
+			if err := c.gitClient.Checkout("", releaseVal); err != nil {
+				issue := fmt.Sprintf("not able to checkout revision: %s for resource: %s in directory: %s", releaseVal, name, dir)
+				log.Warn(issue)
+				result.Critical(issue)
+				continue
+			}
 
 			fp := filepath.Join(kindPath, name, name+".yaml")
-			r := c.appendVersion(&res, fp)
+			resourceExist, err := checkFileExist(fp)
 
+			// a resource may not exist in an order release
+			if !resourceExist {
+				issue := fmt.Sprintf("resource not found under release: %s, skipping...", releaseVal)
+				if err != nil {
+					log.Warn(issue)
+					result.Critical(issue)
+				} else {
+					log.With("action", "ignore").Info(issue)
+				}
+				continue
+			}
+
+			r := c.appendVersion(&res, fp)
 			result.Combine(r)
 			if r.Errors != nil {
 				log.Warn(result.Error())
-				continue
 			}
 		}
 	}
 
 	return &res, result
+}
+
+func checkFileExist(path string) (bool, error) {
+	if _, err := os.Stat(path); err == nil {
+		return true, nil
+	} else if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else {
+		return false, err
+	}
 }
 
 // appendVersion reads the contents of the file at filePath and use the K8s deserializer

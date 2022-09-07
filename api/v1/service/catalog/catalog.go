@@ -55,11 +55,12 @@ func (s *service) List(ctx context.Context) (*catalog.ListResult, error) {
 	for _, c := range all {
 		res.Data = append(res.Data,
 			&catalog.Catalog{
-				ID:       c.ID,
-				Name:     c.Name,
-				Type:     c.Type,
-				URL:      c.URL,
-				Provider: c.Provider,
+				ID:         c.ID,
+				Name:       c.Name,
+				Type:       c.Type,
+				URL:        c.URL,
+				Provider:   c.Provider,
+				Versioning: c.Versioning,
 			})
 	}
 

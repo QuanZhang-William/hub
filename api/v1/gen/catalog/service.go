@@ -40,6 +40,8 @@ type Catalog struct {
 	URL string
 	// Provider of catalog
 	Provider string
+	// Versioning of catalog
+	Versioning string
 }
 
 // ListResult is the result type of the catalog service List method.

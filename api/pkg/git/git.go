@@ -86,7 +86,7 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 	}
 	log.With("url", spec.URL, "revision", spec.Revision, "path", repo.path).Info("successfully cloned")
 
-	if spec.FetchAllTags {
+	if spec.FetchTags {
 		fetchArgs = []string{"fetch", "--tags", "-f"}
 		if _, err := Git(log, "", fetchArgs...); err != nil {
 			return nil, err
@@ -99,7 +99,7 @@ func (c *client) Fetch(spec FetchSpec) (Repo, error) {
 
 func (c *client) Checkout(repoPath, revision string) error {
 	defer func() { <-c.lock }()
-	log := c.log.With("name", "git")
+	log := c.log.With("name", "git").With("revision", revision)
 	c.lock <- 1
 	if _, err := Git(log, repoPath, "checkout", revision); err != nil {
 		return err

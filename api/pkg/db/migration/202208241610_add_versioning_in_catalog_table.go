@@ -1,4 +1,4 @@
-// Copyright © 2021 The Tekton Authors.
+// Copyright © 2022 The Tekton Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ func addVersioningColumnInCatalogsTable(log *log.Logger) *gormigrate.Migration {
 	return &gormigrate.Migration{
 		ID: "202208241610_add_versioning_in_catalog_table",
 		Migrate: func(db *gorm.DB) error {
-			if err := db.AutoMigrate(&model.Catalog{}); err != nil {
+			if err := db.Migrator().AddColumn(&model.Catalog{}, "versioning"); err != nil {
 				log.Error(err)
 				return err
 			}

@@ -19,6 +19,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/tektoncd/hub/api/pkg/cli/hub"
 	tknVer "github.com/tektoncd/hub/api/pkg/cli/version"
 	kErr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,8 +28,14 @@ import (
 )
 
 const (
-	catalogLabel = "hub.tekton.dev/catalog"
-	versionLabel = "app.kubernetes.io/version"
+	catalogLabel            = "hub.tekton.dev/catalog"
+	orgLabel                = "artifacthub.io/org"
+	artifactHubCatalogLabel = "artifacthub.io/catalog"
+	supportTierLabel        = "artifacthub.io/support-tier"
+	versionLabel            = "app.kubernetes.io/version"
+	verifiedCatalogOrg      = "tekton"
+	communitySupportTier    = "community"
+	verifiedSupportTier     = "verified"
 )
 
 // Errors
@@ -82,7 +89,7 @@ func (i *Installer) checkVersion(resPipMinVersion string) error {
 }
 
 // Install a resource
-func (i *Installer) Install(data []byte, catalog, namespace string) (*unstructured.Unstructured, []error) {
+func (i *Installer) Install(data []byte, catalog, org, hubType, namespace string) (*unstructured.Unstructured, []error) {
 
 	errors := make([]error, 0)
 
@@ -110,7 +117,7 @@ func (i *Installer) Install(data []byte, catalog, namespace string) (*unstructur
 	if err != nil {
 		// If error is notFoundError then create the resource
 		if kErr.IsNotFound(err) {
-			resp, err := i.createRes(newRes, catalog, namespace)
+			resp, err := i.createRes(newRes, org, catalog, hubType, namespace)
 			if err != nil {
 				errors = append(errors, err)
 			}
@@ -277,9 +284,9 @@ func checkLabels(res *unstructured.Unstructured) error {
 	return nil
 }
 
-func (i *Installer) createRes(obj *unstructured.Unstructured, catalog, namespace string) (*unstructured.Unstructured, error) {
+func (i *Installer) createRes(obj *unstructured.Unstructured, org, catalog, hubType, namespace string) (*unstructured.Unstructured, error) {
 
-	addCatalogLabel(obj, catalog)
+	addCatalogLabel(obj, catalog, org, hubType)
 	res, err := i.create(obj, namespace, metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
@@ -314,11 +321,23 @@ func toUnstructured(data []byte) (*unstructured.Unstructured, error) {
 	return res, nil
 }
 
-func addCatalogLabel(obj *unstructured.Unstructured, catalog string) {
+func addCatalogLabel(obj *unstructured.Unstructured, catalog, org, hubType string) {
 	labels := obj.GetLabels()
 	if len(labels) == 0 {
 		labels = make(map[string]string)
 	}
-	labels[catalogLabel] = catalog
+
+	switch hubType {
+	case hub.TektonHubType:
+		labels[catalogLabel] = catalog
+	case hub.ArtifactHubType:
+		labels[orgLabel] = org
+		if org == verifiedCatalogOrg {
+			labels[supportTierLabel] = verifiedSupportTier
+		} else {
+			labels[supportTierLabel] = communitySupportTier
+		}
+	}
+
 	obj.SetLabels(labels)
 }

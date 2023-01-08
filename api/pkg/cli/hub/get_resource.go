@@ -74,9 +74,14 @@ type ResourceWithVersionData = rclient.ResourceVersionDataResponseBody
 type resourceYaml = rclient.ByCatalogKindNameVersionYamlResponseBody
 
 type ArtifactHubPkgResponse struct {
-	Name              string    `json:"name,omitempty"`
-	Data              PkgData   `json:"data,omitempty"`
-	AvailableVersions []Version `json:"available_versions,omitempty"`
+	Name              string     `json:"name,omitempty"`
+	Data              PkgData    `json:"data,omitempty"`
+	AvailableVersions []Version  `json:"available_versions,omitempty"`
+	Repository        Repository `json:"repository,omitempty"`
+}
+
+type Repository struct {
+	Org string `json:"organization_name,omitempty"`
 }
 
 type PkgData struct {
@@ -230,6 +235,11 @@ func (rr *ResourceResult) Manifest() ([]byte, error) {
 	return data, nil
 }
 
+// HubType returns the Hub type of the result
+func (rr *ResourceResult) HubType() string {
+	return rr.hubType
+}
+
 // Resource returns the resource found
 func (rr *ResourceResult) Resource() (interface{}, error) {
 	if err := rr.unmarshalData(); err != nil {
@@ -273,6 +283,23 @@ func (rr *ResourceResult) ResourceYaml() (string, error) {
 		return res.Data.ManifestRaw, nil
 	default:
 		return "", fmt.Errorf("hub type: %s not supported to resolve resource yaml", rr.hubType)
+	}
+}
+
+// Resource returns the resource found
+func (rr *ResourceResult) Organization() (string, error) {
+	switch rr.hubType {
+	case ArtifactHubType:
+		if err := rr.validateData(); err != nil {
+			return "", err
+		}
+		res := ArtifactHubPkgResponse{}
+		if err := json.Unmarshal(rr.data, &res); err != nil {
+			return "", err
+		}
+		return res.Repository.Org, nil
+	default:
+		return "", nil
 	}
 }
 
